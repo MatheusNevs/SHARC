@@ -22,6 +22,7 @@ from sharc.propagation.propagation_clear_air_452 import PropagationClearAir
 from sharc.propagation.propagation_tvro import PropagationTvro
 from sharc.propagation.propagation_indoor import PropagationIndoor
 from sharc.propagation.propagation_hdfss import PropagationHDFSS
+from sharc.propagation.propagation_p2001 import PropagationP2001
 
 
 class PropagationFactory(object):
@@ -97,6 +98,9 @@ class PropagationFactory(object):
         elif channel_model == "P452":
             return PropagationClearAir(
                 random_number_gen, param_system.param_p452)
+        elif channel_model == "P2001":
+            return PropagationP2001(
+                random_number_gen, param_system.param_p2001)
         elif channel_model == "TVRO-URBAN":
             return PropagationTvro(random_number_gen, "URBAN")
         elif channel_model == "TVRO-SUBURBAN":
