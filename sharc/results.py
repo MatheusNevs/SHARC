@@ -329,11 +329,18 @@ class Results(object):
 
         Returns:
             list[str]: A list containing the most recent output dirname for each output_prefix.
+            Directories that don't match the expected date pattern are kept as-is.
         """
         res = {}
+        non_dated_dirs = []
 
         for dirname in dirnames:
-            prefix, date, id = Results.get_prefix_date_and_id(dirname)
+            parsed = Results.get_prefix_date_and_id(dirname)
+            # Keep directories that don't match the expected pattern
+            if parsed is None:
+                non_dated_dirs.append(dirname)
+                continue
+            prefix, date, id = parsed
             res.setdefault(
                 prefix, {
                     "date": date, "id": id, "dirname": dirname})
@@ -345,7 +352,8 @@ class Results(object):
                 res[prefix]["id"] = id
                 res[prefix]["dirname"] = dirname
 
-        return list(map(lambda x: x["dirname"], res.values()))
+        # Return both dated (filtered) and non-dated directories
+        return list(map(lambda x: x["dirname"], res.values())) + non_dated_dirs
 
     @staticmethod
     def get_prefix_date_and_id(dirname: str) -> tuple[str, str, str]:
@@ -357,9 +365,13 @@ class Results(object):
 
         Returns:
             tuple: A tuple containing the prefix, date, and id as strings.
+            Returns None if the directory name doesn't match the expected pattern.
         """
         mtch = re.search(
             "(.*)(20[2-9][0-9]-[0-1][0-9]-[0-3][0-9])_([0-9]{2})",
             dirname)
+        if mtch is None:
+            # Return None to signal that this directory doesn't match the expected pattern
+            return None
         prefix, date, id = mtch.group(1), mtch.group(2), mtch.group(3)
         return prefix, date, id
