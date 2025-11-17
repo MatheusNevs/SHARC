@@ -914,11 +914,18 @@ single_space_station:
         ###########################################################################
         # earth station lat long [deg]
         es_long_deg: 1
+        # Where to point antenna if azimuth|elevation use "POINTING_AT_LAT_LONG_ALT"
+        # latitude [deg]
+        pointing_at_lat: 0.
+        # longitude [deg]
+        pointing_at_long: 0.
+        # altitude [m]
+        pointing_at_alt: 0.
         ###########################################################################
         # Antenna azimuth angle [degrees]
         azimuth:
             ###########################################################################
-            # Type of azimuth. May be "FIXED" or "POINTING_AT_IMT"
+            # Type of azimuth. May be "FIXED", "POINTING_AT_IMT" or "POINTING_AT_LAT_LONG_ALT"
             type: POINTING_AT_IMT
             ###########################################################################
             # Arbitrary value of azimuth when type == "FIXED" [deg]
@@ -927,7 +934,7 @@ single_space_station:
         # Antenna elevation angle [degrees]
         elevation:
             ###########################################################################
-            # Type of elevation. May be "FIXED" or "POINTING_AT_IMT"
+            # Type of elevation. May be "FIXED", "POINTING_AT_IMT" or "POINTING_AT_LAT_LONG_ALT"
             type: POINTING_AT_IMT
             ###########################################################################
             # Arbitrary value of elevation when type == "FIXED" [deg]
@@ -1090,12 +1097,11 @@ mss_d2d:
     # Antenna pattern from ITU-R S.1528
     # Possible values: "ITU-R-S.1528-Section1.2", "ITU-R-S.1528-LEO"
     antenna_pattern: ITU-R-S.1528-Taylor
-    # Radius of the antenna's circular aperture in meters
-    antenna_diamter: 1.0
-    # The required near-in-side-lobe level (dB) relative to peak gain
-    antenna_l_s: -6.75
-    # 3 dB beamwidth angle (3 dB below maximum gain) [degrees]
-    antenna_3_dB_bw: 4.4127
+    antenna_s1528:
+        # The required near-in-side-lobe level (dB) relative to peak gain
+        antenna_l_s: -6.75
+        # 3 dB beamwidth angle (3 dB below maximum gain) [degrees]
+        antenna_3_dB_bw: 4.4127
     # channel model, possible values are "FSPL" (free-space path loss),
     #                                    "SatelliteSimple" (FSPL + 4 + clutter loss)
     #                                    "P619"

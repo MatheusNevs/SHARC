@@ -51,6 +51,7 @@ from sharc.antenna.antenna_s672 import AntennaS672
 from sharc.antenna.antenna_s1528 import AntennaS1528
 from sharc.antenna.antenna_s1855 import AntennaS1855
 from sharc.antenna.antenna_s1528 import AntennaS1528, AntennaS1528Leo, AntennaS1528Taylor
+from sharc.antenna.antenna_f1245_fs import Atenna_f1245_fs
 from sharc.antenna.antenna_beamforming_imt import AntennaBeamformingImt
 from sharc.topology.topology import Topology
 from sharc.topology.topology_ntn import TopologyNTN
@@ -59,6 +60,7 @@ from sharc.topology.topology_imt_mss_dc import TopologyImtMssDc
 from sharc.mask.spectral_mask_3gpp import SpectralMask3Gpp
 from sharc.mask.spectral_mask_mss import SpectralMaskMSS
 from sharc.support.sharc_geom import GeometryConverter
+from sharc.mask.spectral_mask_imt2030 import SpectralMaskImt2030
 from sharc.support.sharc_utils import wrap2_180
 
 
@@ -189,6 +191,15 @@ class StationFactory(object):
                 param.frequency,
                 param.bandwidth,
                 param.spurious_emissions
+            )
+        elif param.spectral_mask == "IMT-2030":
+            imt_base_stations.spectral_mask = SpectralMaskImt2030(
+                StationType.IMT_BS,
+                param.frequency,
+                param.bandwidth,
+                param.spurious_emissions,
+                param.category,
+                scenario=param.topology.type,
             )
         else:
             raise ValueError(
@@ -489,6 +500,15 @@ class StationFactory(object):
                 param.bandwidth,
                 param.spurious_emissions,
             )
+        elif param.spectral_mask == "IMT-2030":
+            imt_ue.spectral_mask = SpectralMaskImt2030(
+                StationType.IMT_BS,
+                param.frequency,
+                param.bandwidth,
+                param.spurious_emissions,
+                param.category,
+                scenario=param.topology.type,
+            )
         else:
             raise ValueError(f"Invalid spectral mask {param.spectral_mask}")
 
@@ -666,7 +686,15 @@ class StationFactory(object):
                 param.bandwidth,
                 param.spurious_emissions,
             )
-
+        elif param.spectral_mask == "IMT-2030":
+            imt_ue.spectral_mask = SpectralMaskImt2030(
+                StationType.IMT_BS,
+                param.frequency,
+                param.bandwidth,
+                param.spurious_emissions,
+                param.category,
+                scenario=param.topology.type,
+            )
         imt_ue.spectral_mask.set_mask()
 
         return imt_ue
@@ -746,15 +774,13 @@ class StationFactory(object):
     @staticmethod
     def generate_single_space_station(
             param: ParametersSingleSpaceStation,
-            simplify_dist_to_y=True):
+        ):
         """Create a single space station (satellite) based on the provided parameters.
 
         Parameters
         ----------
         param : ParametersSingleSpaceStation
             Parameters for the single space station.
-        simplify_dist_to_y : bool, optional
-            If True (default), places the satellite only on the y axis.
 
         Returns
         -------
@@ -765,52 +791,36 @@ class StationFactory(object):
         space_station.station_type = StationType.SINGLE_SPACE_STATION
         space_station.is_space_station = True
 
-        # now we set the coordinates according to
-        # ITU-R P619-1, Attachment A
+        geoconv = GeometryConverter()
+        geoconv.set_reference(
+            param.geometry.es_lat_deg,
+            param.geometry.es_long_deg,
+            param.geometry.es_altitude,
+        )
+        x, y, z = geoconv.convert_lla_to_transformed_cartesian(
+            param.geometry.location.fixed.lat_deg,
+            param.geometry.location.fixed.long_deg,
+            param.geometry.altitude,
+        )
 
-        # calculate distances to the centre of the Earth
-        dist_sat_centre_earth_km = (
-            EARTH_RADIUS + param.geometry.altitude) / 1000
-        dist_imt_centre_earth_km = (
-            EARTH_RADIUS + param.geometry.es_altitude
-        ) / 1000
-
-        # calculate Cartesian coordinates of satellite, with origin at centre
-        # of the Earth
-        sat_lat_rad = param.geometry.location.fixed.lat_deg * np.pi / 180.
-        imt_long_diff_rad = (param.geometry.location.fixed.long_deg -
-                             param.geometry.es_long_deg) * np.pi / 180.
-        x1 = dist_sat_centre_earth_km * \
-            np.cos(sat_lat_rad) * np.cos(imt_long_diff_rad)
-        y1 = dist_sat_centre_earth_km * \
-            np.cos(sat_lat_rad) * np.sin(imt_long_diff_rad)
-        z1 = dist_sat_centre_earth_km * np.sin(sat_lat_rad)
-
-        # rotate axis and calculate coordinates with origin at IMT system
-        imt_lat_rad = param.geometry.es_lat_deg * np.pi / 180.
-        space_station.x = np.array(
-            [x1 * np.sin(imt_lat_rad) - z1 * np.cos(imt_lat_rad)],
-        ) * 1000
-        space_station.y = np.array([y1]) * 1000
-        space_station.height = np.array([
-            (
-                z1 * np.sin(imt_lat_rad) + x1 * np.cos(imt_lat_rad) -
-                dist_imt_centre_earth_km
-            ) * 1000,
-        ])
-
-        # putting on y axis
-        if simplify_dist_to_y:
-            space_station.y = np.sqrt(
-                space_station.x *
-                space_station.x +
-                space_station.y *
-                space_station.y)
-            space_station.x = np.zeros_like(space_station.x)
+        space_station.x = x
+        space_station.y = y
+        space_station.z = z
+        # TODO: put actual altitude instead of z on station.height
+        space_station.height = z
 
         if param.geometry.azimuth.type == "POINTING_AT_IMT":
             space_station.azimuth = np.rad2deg(
                 np.arctan2(-space_station.y, -space_station.x))
+        elif param.geometry.azimuth.type == "POINTING_AT_LAT_LONG_ALT":
+            px, py, pz = geoconv.convert_lla_to_transformed_cartesian(
+                param.geometry.pointing_at_lat,
+                param.geometry.pointing_at_long,
+                param.geometry.pointing_at_alt,
+            )
+
+            space_station.azimuth = np.rad2deg(
+                np.arctan2(py - space_station.y, px - space_station.x))
         elif param.geometry.azimuth.type == "FIXED":
             space_station.azimuth = param.geometry.azimuth.fixed
         else:
@@ -818,17 +828,32 @@ class StationFactory(object):
                 f"Did not recognize azimuth type of {
                     param.geometry.azimuth.type}")
 
-        if param.geometry.azimuth.type == "POINTING_AT_IMT":
+        if param.geometry.elevation.type == "POINTING_AT_IMT":
             gnd_elev = np.rad2deg(
                 np.arctan2(
-                    space_station.height,
+                    space_station.z,
                     np.sqrt(
                         space_station.y *
                         space_station.y +
                         space_station.x *
                         space_station.x)))
             space_station.elevation = -gnd_elev
-        elif param.geometry.azimuth.type == "FIXED":
+        elif param.geometry.elevation.type == "POINTING_AT_LAT_LONG_ALT":
+            px, py, pz = geoconv.convert_lla_to_transformed_cartesian(
+                param.geometry.pointing_at_lat,
+                param.geometry.pointing_at_long,
+                param.geometry.pointing_at_alt,
+            )
+            dy = py - space_station.y
+            dx = px - space_station.x
+            dz = pz - space_station.z
+
+            gnd_elev = np.rad2deg(
+                np.arctan2(
+                    dz,
+                    np.sqrt(dy * dy + dx * dx)))
+            space_station.elevation = gnd_elev
+        elif param.geometry.elevation.type == "FIXED":
             space_station.elevation = param.geometry.elevation.fixed
         else:
             raise ValueError(
@@ -1126,25 +1151,20 @@ class StationFactory(object):
                 single_earth_station.y = np.array(y)
             case "UNIFORM_DIST":
                 # ES is randomly (uniform) created inside a circle of radius
-                # equal to param.max_dist_to_bs
-                if param.geometry.location.uniform_dist.min_dist_to_bs < 0:
+                # equal to param.max_dist_to_center
+                r_min = param.geometry.location.uniform_dist.min_dist_to_center
+                r_max = param.geometry.location.uniform_dist.max_dist_to_center
+                if r_min < 0 or r_min > r_max:
                     sys.stderr.write(
-                        "ERROR\nInvalid minimum distance from Single ES to BS: {}".format(
-                            param.geometry.location.uniform_dist.min_dist_to_bs, ), )
+                        "ERROR\nInvalid minimum distance from Single ES imt center: {}".format(
+                            r_min, ), )
                     sys.exit(1)
-                while (True):
-                    dist_x = random_number_gen.uniform(
-                        -param.geometry.location.uniform_dist.max_dist_to_bs,
-                        param.geometry.location.uniform_dist.max_dist_to_bs,
-                    )
-                    dist_y = random_number_gen.uniform(
-                        -param.geometry.location.uniform_dist.max_dist_to_bs,
-                        param.geometry.location.uniform_dist.max_dist_to_bs,
-                    )
-                    radius = np.sqrt(dist_x**2 + dist_y**2)
-                    if (radius > param.geometry.location.uniform_dist.min_dist_to_bs) & (
-                            radius < param.geometry.location.uniform_dist.max_dist_to_bs):
-                        break
+                radius = np.sqrt(
+                    random_number_gen.uniform() * (r_max**2 - r_min**2) + r_min**2
+                )
+                theta = random_number_gen.uniform(0, 2 * np.pi)
+                dist_x = radius * np.cos(theta)
+                dist_y = radius * np.sin(theta)
                 single_earth_station.x[0] = dist_x
                 single_earth_station.y[0] = dist_y
             case _:
@@ -1176,6 +1196,11 @@ class StationFactory(object):
                     param.geometry.azimuth.uniform_dist.min, param.geometry.azimuth.uniform_dist.max,
                 ),
             ])
+        elif param.geometry.azimuth.type == "POINTING_AT_IMT_CENTER":
+            single_earth_station.azimuth = np.rad2deg(np.arctan2(
+                -single_earth_station.y,
+                -single_earth_station.x
+            ))
         else:
             single_earth_station.azimuth = np.array(
                 [param.geometry.azimuth.fixed],
@@ -1564,6 +1589,7 @@ class StationFactory(object):
         mss_ss.y = ntn_topology.space_station_y * np.ones(num_bs) + param_mss.y
         mss_ss.z = ntn_topology.space_station_z * np.ones(num_bs)
         mss_ss.height = ntn_topology.space_station_z * np.ones(num_bs)
+        mss_ss.bandwidth = param_mss.bandwidth * np.ones(num_bs)
         mss_ss.elevation = ntn_topology.elevation
         mss_ss.is_space_station = True
         mss_ss.azimuth = ntn_topology.azimuth
@@ -1651,6 +1677,9 @@ class StationFactory(object):
         mss_d2d = StationManager(n=total_satellites)
         mss_d2d.station_type = StationType.MSS_D2D  # Set the station type to MSS D2D
         mss_d2d.is_space_station = True  # Indicate that the station is in space
+        mss_d2d.bandwidth = params.bandwidth * np.ones(total_satellites)
+        mss_d2d.center_freq = params.frequency * np.ones(total_satellites)
+        mss_d2d.noise_temperature = params.noise_temperature * np.ones(total_satellites)
 
         if params.spectral_mask == "IMT-2020":
             mss_d2d.spectral_mask = SpectralMaskImt(StationType.IMT_BS,
@@ -1750,7 +1779,7 @@ class StationFactory(object):
         tuple
             x, y, z, azimuth and elevation angles.
         """
-        hexagon_radius = topology.intersite_distance * 2 / 3
+        hexagon_radius = topology.intersite_distance * 2 / 3 / 2
 
         x = np.array([])
         y = np.array([])
