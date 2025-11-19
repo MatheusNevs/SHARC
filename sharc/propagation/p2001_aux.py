@@ -49,7 +49,7 @@ class P2001Aux:
         else:
             warnings.warn(f"Digital maps not found at: {digital_maps_path}. Using typical values.")
     
-    def interp2(self, map_name: str, lon: float, lat: float, default_value: float = None) -> float:
+    def interp2(self, map_name: str, lon: float, lat: float, long_spacing: float, lat_spacing: float, default_value: float = None) -> float:
         """
         Interpolate value from digital map at given coordinates
         
@@ -61,6 +61,10 @@ class P2001Aux:
             Longitude in degrees (-180 to +180)
         lat : float
             Latitude in degrees (-90 to +90)
+        long_spacing: float
+            Longitude spacing in degrees
+        lat_spacing: float
+            Latitude spacing in degrees
         default_value : float, optional
             Value to return if maps not loaded or interpolation fails
             
@@ -76,7 +80,7 @@ class P2001Aux:
             return default_value
         
         try:
-            # Digital maps use 1.5° spacing
+            # Digital maps may use 1.5° or 1.125° spacing
             # Latitude: 90 to -90 (index 0 to 120)
             # Longitude: 0 to 360 (index 0 to 239), but input is -180 to +180
             
@@ -84,8 +88,8 @@ class P2001Aux:
             lon_360 = lon if lon >= 0 else lon + 360
             
             # Map coordinates to indices
-            lat_idx = (90 - lat) / 1.5
-            lon_idx = lon_360 / 1.5
+            lat_idx = (90 - lat) / lat_spacing
+            lon_idx = lon_360 / long_spacing
             
             # Get map data
             map_data = self.DigitalMaps[map_name]
@@ -181,6 +185,7 @@ class P2001Aux:
         Phime, Phimn, _, _ = self.great_circle_path(
             Phire, Phite, Phirn, Phitn, self.Re, dpnt
         )
+        Phime1 = Phime if Phime >= 0 else Phime1 = Phime + 360
         
         # Ground height at mid-point (3.2.2)
         n = len(d)
@@ -208,11 +213,12 @@ class P2001Aux:
         
         # 3.5 Effective Earth-radius geometry
         # Get refractivity gradient from digital maps or use typical value
-        Nd1km50 = self.interp2('DN_Median', Phime, Phimn, default_value=-40.0)
+        Nd1km50 = self.interp2('DN_Median', Phime1, Phimn, 1.5, 1.5, default_value=-40.0)
         Reff50 = 157.0 * self.Re / (157.0 + Nd1km50)  # Eq (3.5.1)
         
-        # For p% time (simplified)
-        Nd1kmp = Nd1km50
+        # For p% time
+        Nd1kmp = Nd1km50 + self.interp2('DN_SupSlope', Phime1, Phimn, 1.5, 1.5) * np.log10(0.02 * Tpcp) if Tpcp < 50 \
+            else Nd1km50 - self.interp2('DN_SubSlope', Phime1, Phimn, 1.5, 1.5) * np.log10(0.02 * Tpcp)
         Cp = (157.0 + Nd1kmp) / (157.0 * self.Re)  # Eq (3.5.2)
         Reffp = 1.0 / Cp if Cp > 1e-6 else 1e6  # Eq (3.5.3)
         
@@ -246,7 +252,7 @@ class P2001Aux:
         Agsur = Aosur + Awsur  # Eq (3.10.1)
         
         # Multipath activity (Attachment B.2)
-        Nd65m1 = -100.0  # Typical value, simplified
+        Nd65m1 = self.interp2('dndz_01', Phime1, Phimn, 1.5, 1.5)
         Q0ca = self.multi_path_activity(
             GHz, dt, Hts, Hrs, dlt, dlr, h[lt], h[lr], Hlo,
             theta_t, theta_r, Sp, Nd65m1, Phimn, FlagLos50
@@ -256,6 +262,8 @@ class P2001Aux:
         Q0ra = 2.0  # Typical percentage for rain (simplified)
         Fwvr = 0.5  # Simplified water vapor factor
         A1 = 0.0    # Simplified: no additional attenuation for now
+
+        # a, b, c, dr, Q0ra, Fwvr, kmod, alpha_mod, Gm, Pm, flagrain = self.precipitation_fade_initial(GHz, Tpcq, Phimn, Phime, Hlo, Hhi, dt, FlagVP)
         
         # Sub-model 1 basic transmission loss (4.1.4)
         Lbm1 = Lbfs + Ld + A1 + Fwvr * (Awrsur - Awsur) + Agsur
@@ -289,6 +297,9 @@ class P2001Aux:
         
         # Limit troposcatter loss
         Lbs = max(Lbs, Lbfs)
+
+        # a, b, c, dr, Q0ra, Fwvrtx, kmod, alpha_mod, Gm, Pm, flagrain = precipitation_fade_initial(GHz, Tpcq, Phitcvn, Phitcve, Hts, Hcv, Dtcv, FlagVP)
+
         
         # Gaseous absorption for troposcatter (Attachment F.3)
         Aos, Aws, Awrs, _, _, _, _, _, _, _, _ = self.gaseous_abs_tropo(
@@ -979,7 +990,7 @@ class P2001Aux:
         # Use mid-point coordinates
         phi_mn = 0.5 * (phitn + phirn)
         phi_me = 0.5 * (phite + phire)
-        climzone = int(self.interp2('TropoClim', phi_me, phi_mn, default_value=4))
+        climzone = int(self.interp2('TropoClim', phi_me, phi_mn, 1.5, 1.5, default_value=4))
         
         # Table E.1 parameters
         M_arr = [116, 129.6, 119.73, 109.3, 128.5, 119.73, 123.2]
@@ -1119,7 +1130,7 @@ class P2001Aux:
         Tuple containing Aosur, Awsur, Awrsur, gamma_o, gamma_w, gamma_wr, rho_sur
         """
         # Get water vapor density from digital maps or use typical value
-        rho_sur = self.interp2('surfwv_50_fixed', phi_me, phi_mn, default_value=7.5)
+        rho_sur = self.interp2('surfwv_50_fixed', phi_me, phi_mn, 1.5, 1.5, default_value=7.5)
         h_sur = h_mid
         
         gamma_o, gamma_w = self.specific_sea_level_attenuation(f, rho_sur, h_sur)
@@ -1187,24 +1198,24 @@ class P2001Aux:
         # G.2 Derivation of FoEs from digital maps or use typical values
         # Interpolate FoEs based on time percentage
         if p <= 1:
-            FoEs1hop = self.interp2('FoEs01', phime, phimn, default_value=6.5)
+            FoEs1hop = self.interp2('FoEs01', phime, phimn, 1.5, 1.5, default_value=6.5)
             FoEs2hop = FoEs1hop * 0.9
         elif p <= 10:
-            FoEs01 = self.interp2('FoEs01', phime, phimn, default_value=6.5)
-            FoEs10 = self.interp2('FoEs10', phime, phimn, default_value=5.0)
+            FoEs01 = self.interp2('FoEs01', phime, phimn, 1.5, 1.5, default_value=6.5)
+            FoEs10 = self.interp2('FoEs10', phime, phimn, 1.5, 1.5, default_value=5.0)
             # Linear interpolation between 1% and 10%
             w = (p - 1) / 9.0
             FoEs1hop = FoEs01 * (1 - w) + FoEs10 * w
             FoEs2hop = FoEs1hop * 0.9
         elif p <= 50:
-            FoEs10 = self.interp2('FoEs10', phime, phimn, default_value=5.0)
-            FoEs50 = self.interp2('FoEs50', phime, phimn, default_value=3.5)
+            FoEs10 = self.interp2('FoEs10', phime, phimn, 1.5, 1.5, default_value=5.0)
+            FoEs50 = self.interp2('FoEs50', phime, phimn, 1.5, 1.5, default_value=3.5)
             # Linear interpolation between 10% and 50%
             w = (p - 10) / 40.0
             FoEs1hop = FoEs10 * (1 - w) + FoEs50 * w
             FoEs2hop = FoEs1hop * 0.9
         else:
-            FoEs1hop = self.interp2('FoEs50', phime, phimn, default_value=3.5)
+            FoEs1hop = self.interp2('FoEs50', phime, phimn, 1.5, 1.5, default_value=3.5)
             FoEs2hop = FoEs1hop * 0.9
         
         # G.2 1-hop propagation
@@ -1313,3 +1324,4 @@ class P2001Aux:
         
         Q0ca = qw * 10**(-0.1*Cg)
         return Q0ca
+    
